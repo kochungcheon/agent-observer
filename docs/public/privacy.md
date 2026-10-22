@@ -2,6 +2,8 @@
 
 The server binds only to IPv4 loopback. Do not expose it through a reverse proxy or tunnel. Local processes can access the local observational API; loopback is not a multi-user authentication boundary. Managed messaging has separate scoped credentials stored in private local files.
 
+The connection indicator describes the local observation connection, not agent progress. The viewer shows the last recorded event time separately from the last snapshot check time (in its tooltip). Missing timestamps remain unknown; old records alone do not prove that an agent has stopped. A known source-read error remains visible across reconnection until a new readable snapshot replaces it.
+
 Default startup selects no transcript, enables no catalog, starts no model, and exports nothing. The demo is a browser fixture and does not fetch session content. An explicit source selection authorizes reading that transcript and the matching child records evidenced by its current turn. Normalized graph events omit raw command arguments, tool outputs, and reasoning. Paths and labels can still contain personal or project information; inspect screenshots before sharing them.
 
 The optional catalog reads parent headers, timestamps, and title metadata. Titles can be sensitive. It limits candidates and skips ambiguous/duplicate entries. Catalog permission is not permission to read all conversation bodies. A selected session is opened for its graph.

@@ -485,3 +485,72 @@ for(const [source,message] of [['relative.jsonl','전체 경로'],['/tmp/session
 }
 assert.throws(()=>vm.runInContext("sessionInput('/tmp/file.jsonl','x'.repeat(101))",context),/100자/);
 console.log('PASS: manual connection whitespace, paths with spaces, home shorthand and actionable input errors');
+
+// Transport health and recorded activity are independent evidence. A successful
+// poll/reconnect must not invent a new event or erase a known source-read error.
+const recordedAt='2026-10-15T01:02:03Z',checkedAt='2026-10-15T09:10:11Z';
+const localClock=value=>new Date(value).toLocaleTimeString('ko-KR',{hour12:false});
+context.activitySnapshot={sessionId:'activity',turn:'activity',revision:1,lastEvent:recordedAt,checkedAt,
+ nodes:[{id:'agent',kind:'agent',label:'Synthetic agent'}]};
+vm.runInContext("activeSession='activity';paused=false;applyLiveState(activitySnapshot)",context);
+const heartbeat=dom.get('#heartbeat'),status=dom.get('#status');
+assert.equal(heartbeat.textContent,'마지막 기록 '+localClock(recordedAt),'Use the recorded event time, not the later observation time');
+assert.equal(heartbeat.title,'마지막 확인 '+localClock(checkedAt));
+context.activitySnapshot.checkedAt='2026-10-16T09:10:11Z';
+vm.runInContext('applyLiveState(activitySnapshot)',context);
+assert.equal(heartbeat.textContent,'마지막 기록 '+localClock(recordedAt),'An idle observation does not count as new work');
+assert.equal(status.dataset.state,'online','Old records alone do not establish an agent stall');
+for(const lastEvent of [null,undefined,'invalid','2026-02-30T00:00:00Z']){
+ context.activitySnapshot.lastEvent=lastEvent;
+ vm.runInContext('applyLiveState(activitySnapshot)',context);
+ assert.equal(heartbeat.textContent,'기록 시각 미수집','Missing or invalid event times remain unknown');
+ assert.equal(status.dataset.state,'online');
+}
+context.activitySnapshot.lastEvent=recordedAt;
+context.activitySnapshot.error='Synthetic source read error';
+vm.runInContext('applyLiveState(activitySnapshot);startEventStream(activeSession,connectionGeneration)',context);
+const sourceErrorStream=context.streams.at(-1);
+sourceErrorStream.onopen();
+assert.equal(status.dataset.state,'source-error','SSE open must retain the known source-read error');
+assert.equal(status.textContent,'SSE 연결됨 · 기록 읽기 오류');
+sourceErrorStream.onerror();
+assert.equal(status.dataset.state,'offline','Transport failure is distinct from a source-read error');
+sourceErrorStream.onopen();
+assert.equal(status.dataset.state,'source-error','Automatic reconnection cannot clear source-read evidence');
+const knownSourceState=vm.runInContext('latestState',context);
+vm.runInContext('connectEvents();startEventStream(activeSession,connectionGeneration)',context);
+assert.equal(vm.runInContext('latestState',context),knownSourceState,'An explicit same-session reconnect retains the last source result');
+context.streams.at(-1).onopen();
+assert.equal(status.dataset.state,'source-error');
+context.activitySnapshot.error=null;
+vm.runInContext('applyLiveState(activitySnapshot)',context);
+assert.equal(status.dataset.state,'online','A valid source result clears the error');
+vm.runInContext('paused=true;applyLiveState(activitySnapshot)',context);
+context.streams.at(-1).onopen();
+assert.equal(status.dataset.state,'paused','SSE open does not resume paused rendering');
+vm.runInContext("paused=false;activeSession='another-activity';connectEvents();startEventStream(activeSession,connectionGeneration)",context);
+assert.equal(vm.runInContext('latestState',context),null,'A different session must not inherit the previous source result');
+assert.equal(heartbeat.textContent,'기록 연결 대기');
+assert.equal(heartbeat.title,'');
+context.streams.at(-1).onopen();
+assert.equal(status.textContent,'SSE 연결됨 · 기록 확인 중','Transport open alone is not a successful source read');
+vm.runInContext('openSample()',context);
+assert.equal(status.dataset.state,'sample');
+assert.equal(heartbeat.title,'','Sample mode must not retain a real source observation time');
+
+// Resolve only the status-dot rules; layout/color rendering still needs the
+// real-browser check required by CONTRIBUTING.md.
+const css=html.match(/<style>([\s\S]*?)<\/style>/)[1];
+function statusDotColor(state){
+ let color;
+ for(const [,selectors,declarations] of css.matchAll(/([^{}]+)\{([^{}]+)\}/g)){
+  if(!selectors.split(',').some(s=>s.trim()==='#status:before'||s.trim()===`#status[data-state="${state}"]:before`))continue;
+  color=/(?:^|;)\s*background\s*:\s*([^;]+)/.exec(declarations)?.[1]||color;
+ }
+ return color;
+}
+for(const state of ['connecting','sample','unknown'])assert.notEqual(statusDotColor(state),statusDotColor('online'),'Only an established connection gets the online color');
+assert.notEqual(statusDotColor('source-error'),statusDotColor('online'));
+assert.equal(statusDotColor('source-error'),statusDotColor('offline'),'Source-read failures retain the error color');
+assert.notEqual(statusDotColor('paused'),statusDotColor('online'));
+console.log('PASS: recorded activity vs observation time, unknown timestamps, reconnect/source-error precedence, pause and status-dot colors');
